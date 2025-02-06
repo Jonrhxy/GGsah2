@@ -1,17 +1,15 @@
 package com.example.firstpage;
 
+import android.graphics.Color;
 import android.os.Bundle;
-import android.view.LayoutInflater;
-import android.view.View;
+import android.view.Gravity;
 import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QueryDocumentSnapshot;
 
 import java.util.ArrayList;
@@ -23,51 +21,47 @@ public class LeaderBoards extends AppCompatActivity {
     private TextView firstPlaceName, firstPlaceScore;
     private TextView secondPlaceName, secondPlaceScore;
     private TextView thirdPlaceName, thirdPlaceScore;
-
-    private RecyclerView remainingLeaderboard;
-    private RecyclerView.Adapter<RecyclerView.ViewHolder> adapter;
-    private List<GameData> remainingPlayers;
+    private LinearLayout remainingLeaderboardContainer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_leader_boards);
 
-        // Initialize Firebase Firestore
+        // Initialize Firestore
         db = FirebaseFirestore.getInstance();
 
-        // Initialize TextViews for top 3
+        // Bind UI elements
         firstPlaceName = findViewById(R.id.first_place_name);
         firstPlaceScore = findViewById(R.id.first_place_rank);
         secondPlaceName = findViewById(R.id.second_place_name);
         secondPlaceScore = findViewById(R.id.second_place_rank);
         thirdPlaceName = findViewById(R.id.third_place_name);
         thirdPlaceScore = findViewById(R.id.third_place_rank);
-
-        // Initialize RecyclerView for remaining leaderboard
-        remainingLeaderboard = findViewById(R.id.remaining_leaderboard);
-        remainingLeaderboard.setLayoutManager(new LinearLayoutManager(this));
-        remainingPlayers = new ArrayList<>();
+        remainingLeaderboardContainer = findViewById(R.id.remaining_leaderboard_container);
 
         // Load leaderboard data
         loadLeaderBoardData();
     }
 
+    // Load and sort leaderboard data based on highScore
     private void loadLeaderBoardData() {
         db.collection("Games")
-                .orderBy("points", Query.Direction.DESCENDING) // Sort by points in descending order
-                .limit(10) // Limit to the top 10 players
                 .get()
                 .addOnCompleteListener(task -> {
                     if (task.isSuccessful()) {
                         List<GameData> leaderboardData = new ArrayList<>();
                         for (QueryDocumentSnapshot document : task.getResult()) {
-                            GameData gameData = document.toObject(GameData.class);
-                            gameData.username = document.getId(); // Assume the document ID is the username
-                            leaderboardData.add(gameData);
+                            if (document.contains("highScore")) { // Use highScore instead of points
+                                GameData gameData = new GameData(
+                                        document.getId(),
+                                        document.getLong("highScore").intValue()
+                                );
+                                leaderboardData.add(gameData);
+                            }
                         }
-
-                        // Update the UI with sorted data
+                        // Sort by highScore (highest first)
+                        leaderboardData.sort((a, b) -> Integer.compare(b.highScore, a.highScore));
                         updateLeaderboardUI(leaderboardData);
                     } else {
                         System.err.println("Error getting documents: " + task.getException());
@@ -75,76 +69,91 @@ public class LeaderBoards extends AppCompatActivity {
                 });
     }
 
+    // Update Firestore only if the new score is higher than current highScore
+    public void updateUserScore(String username, int newScore) {
+        db.collection("Games").document(username)
+                .get()
+                .addOnSuccessListener(document -> {
+                    if (document.exists() && document.contains("highScore")) {
+                        int currentHighScore = document.getLong("highScore").intValue();
+                        if (newScore > currentHighScore) {
+                            // Update only if the new score is higher than highScore
+                            db.collection("Games").document(username)
+                                    .update("highScore", newScore)
+                                    .addOnSuccessListener(aVoid -> System.out.println("High score updated successfully"))
+                                    .addOnFailureListener(e -> System.err.println("Error updating high score: " + e.getMessage()));
+                        }
+                    } else {
+                        // Add new record if user does not exist
+                        db.collection("Games").document(username)
+                                .set(new GameData(username, newScore))
+                                .addOnSuccessListener(aVoid -> System.out.println("New high score added successfully"))
+                                .addOnFailureListener(e -> System.err.println("Error adding new high score: " + e.getMessage()));
+                    }
+                })
+                .addOnFailureListener(e -> System.err.println("Error fetching document: " + e.getMessage()));
+    }
+
+    // Update leaderboard UI
     private void updateLeaderboardUI(List<GameData> leaderboardData) {
-        // Update Top 1
-        if (leaderboardData.size() > 0) {
-            GameData firstPlace = leaderboardData.get(0);
-            firstPlaceName.setText(firstPlace.username);
-            firstPlaceScore.setText("Points: " + firstPlace.points + " | High Score: " + firstPlace.highScore);
-        }
+        remainingLeaderboardContainer.removeAllViews(); // Clear previous views
 
-        // Update Top 2
-        if (leaderboardData.size() > 1) {
-            GameData secondPlace = leaderboardData.get(1);
-            secondPlaceName.setText(secondPlace.username);
-            secondPlaceScore.setText("Points: " + secondPlace.points + " | High Score: " + secondPlace.highScore);
-        }
+        for (int i = 0; i < leaderboardData.size(); i++) {
+            GameData player = leaderboardData.get(i);
 
-        // Update Top 3
-        if (leaderboardData.size() > 2) {
-            GameData thirdPlace = leaderboardData.get(2);
-            thirdPlaceName.setText(thirdPlace.username);
-            thirdPlaceScore.setText("Points: " + thirdPlace.points + " | High Score: " + thirdPlace.highScore);
-        }
-
-        // Update RecyclerView for remaining players
-        if (leaderboardData.size() > 3) {
-            remainingPlayers.clear();
-            remainingPlayers.addAll(leaderboardData.subList(3, leaderboardData.size()));
-            if (adapter == null) {
-                adapter = new RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-                    @Override
-                    public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-                        // Inflate a simple item view for each remaining player
-                        View view = LayoutInflater.from(parent.getContext()).inflate(android.R.layout.simple_list_item_2, parent, false);
-                        return new RecyclerView.ViewHolder(view) {};
-                    }
-
-                    @Override
-                    public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
-                        GameData player = remainingPlayers.get(position);
-                        TextView text1 = holder.itemView.findViewById(android.R.id.text1);
-                        TextView text2 = holder.itemView.findViewById(android.R.id.text2);
-
-                        text1.setText((position + 4) + ". " + player.username); // Rank + username
-                        text2.setText("Points: " + player.points); // Points
-                    }
-
-                    @Override
-                    public int getItemCount() {
-                        return remainingPlayers.size();
-                    }
-                };
-                remainingLeaderboard.setAdapter(adapter);
-            } else {
-                adapter.notifyDataSetChanged();
+            // Assign top 3 players to special slots
+            if (i == 0) {
+                firstPlaceName.setText(player.username);
+                firstPlaceScore.setText(player.highScore + " HIGH SCORE");
+            } else if (i == 1) {
+                secondPlaceName.setText(player.username);
+                secondPlaceScore.setText(player.highScore + " HIGH SCORE");
+            } else if (i == 2) {
+                thirdPlaceName.setText(player.username);
+                thirdPlaceScore.setText(player.highScore + " HIGH SCORE");
             }
+
+            // Create a new layout for the ranking list (including Top 1-3)
+            LinearLayout playerLayout = new LinearLayout(this);
+            playerLayout.setOrientation(LinearLayout.HORIZONTAL);
+            playerLayout.setPadding(16, 8, 16, 8);
+            playerLayout.setBackgroundColor(Color.parseColor(i % 2 == 0 ? "#DFF8E7" : "#C8E6C9")); // Alternating row colors
+            playerLayout.setGravity(Gravity.CENTER_VERTICAL);
+            playerLayout.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            // TextView for rank + name
+            TextView playerName = new TextView(this);
+            playerName.setText((i + 1) + ". " + player.username);
+            playerName.setTextSize(16);
+            playerName.setTextColor(Color.BLACK);
+            playerName.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+            // TextView for score
+            TextView playerPoints = new TextView(this);
+            playerPoints.setText(player.highScore + " HIGH SCORE");
+            playerPoints.setTextSize(14);
+            playerPoints.setTextColor(Color.DKGRAY);
+
+            // Add TextViews to the layout
+            playerLayout.addView(playerName);
+            playerLayout.addView(playerPoints);
+
+            // Add to the remaining leaderboard container
+            remainingLeaderboardContainer.addView(playerLayout);
         }
     }
 
-    // Game data model class for Firestore
+    // Data model for leaderboard
     public static class GameData {
-        public String username; // To store the player's username
-        public int points;
-        public int highScore;
+        public String username;
+        public int highScore; // Updated field
 
         public GameData() {
-            // Default constructor required for Firestore
+            // Default constructor
         }
 
-        public GameData(String username, int points, int highScore) {
+        public GameData(String username, int highScore) {
             this.username = username;
-            this.points = points;
             this.highScore = highScore;
         }
     }

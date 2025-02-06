@@ -43,6 +43,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
+    implementation(libs.cardview)
     implementation ("com.google.android.material:material:1.9.0")
 
     // Firebase and Play Services dependencies
